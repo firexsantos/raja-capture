@@ -89,6 +89,8 @@ class RajaApp(QObject):
         self._dialogs: list = []
         self._restore_toolbar = False
         self._notified: set = set()
+        self._perm_ok = False
+        self._last_mode = "region"
 
         self.recorder = Recorder(self.cfg, self)
         self.recorder.started.connect(self._on_record_started)
@@ -104,6 +106,11 @@ class RajaApp(QObject):
 
         self.ipc = IpcServer(self)
         self.ipc.commandReceived.connect(self.handle_command)
+
+        from .ui.update_dialog import UpdateManager
+
+        self.updates = UpdateManager(self)
+        self.updates.start()
 
         self.hotkeys = HotkeyManager(self.cfg, self)
         self.hotkeys.activated.connect(self.start_capture)
@@ -137,6 +144,8 @@ class RajaApp(QObject):
         menu.addSeparator()
         menu.addAction("Tampilkan toolbar", self.show_toolbar)
         menu.addAction(icons.icon("settings"), "Pengaturan…", self.show_settings)
+        menu.addAction("Cek pembaruan…", lambda: self.updates.check(manual=True))
+        menu.addAction(f"Tentang Raja Capture {__version__}", self.show_about)
         menu.addAction("Keluar", self.quit)
         tray.setContextMenu(menu)
         self._tray_menu = menu
@@ -189,6 +198,10 @@ class RajaApp(QObject):
             return
         if self.busy or self._scroll is not None:
             return
+        if self._needs_screenshot_permission(mode):
+            self._ask_permission(lambda: self.start_capture(mode))
+            return
+        self._last_mode = mode
         self.busy = True
         self._restore_toolbar = self.toolbar.isVisible() and self.cfg.get("hide_toolbar")
         if self._restore_toolbar:
@@ -206,9 +219,46 @@ class RajaApp(QObject):
             self._restore_toolbar = False
             self.toolbar.show()
 
+    # Wayland/GNOME: an app with a registered id must be granted screenshot access
+    # once, and GNOME only shows that dialog while the app has a focused window.
+    def _needs_screenshot_permission(self, mode: str) -> bool:
+        if self.backend.name != "portal" or self._perm_ok:
+            return False
+        if mode == "record_full" or (mode == "window" and not self.backend.can_pick_windows):
+            return False  # these use interactive portals that ask on their own
+        from .capture.portal import screenshot_permission
+
+        self._perm_ok = screenshot_permission() == "yes"
+        return not self._perm_ok
+
+    def _ask_permission(self, then):
+        from .ui.dialogs import PermissionDialog
+
+        dlg = PermissionDialog()
+        dlg.setAttribute(Qt.WA_DeleteOnClose)
+
+        def done(result):
+            if result:
+                self._perm_ok = True
+                self.notify("Izin tangkap layar diberikan.")
+                QTimer.singleShot(300, then)
+
+        dlg.finished.connect(done)
+        self._keep(dlg)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
     def _capture_error(self, exc):
         self._end_capture()
         if isinstance(exc, CaptureCancelled):
+            return
+        from .capture.portal import PortalAccessDenied
+
+        if isinstance(exc, PortalAccessDenied):
+            self._perm_ok = False
+            mode = getattr(self, "_last_mode", "region")
+            self._ask_permission(lambda: self.start_capture(mode))
             return
         QMessageBox.warning(None, APP_NAME, f"Gagal menangkap layar:\n{exc}")
 
@@ -401,6 +451,17 @@ class RajaApp(QObject):
         path, _ = QFileDialog.getOpenFileName(None, "Buka gambar", self.cfg.get("output_dir"), OPEN_FILTER)
         if path:
             self.open_image_file(path)
+
+    def show_about(self):
+        box = QMessageBox(QMessageBox.NoIcon, f"Tentang {APP_NAME}",
+                          f"<h3>{APP_NAME} {__version__}</h3>"
+                          "<p>Tangkap, tandai, rekam &amp; bagikan layar.</p>"
+                          "<p><a href='https://firexsantos.github.io/raja-capture/'>Website</a> · "
+                          "<a href='https://github.com/firexsantos/raja-capture/blob/main/CHANGELOG.md'>"
+                          "Catatan perubahan</a> · Lisensi MIT</p>")
+        box.setIconPixmap(icons.app_icon().pixmap(64, 64))
+        box.setTextFormat(Qt.RichText)
+        box.exec()
 
     def show_upload_history(self):
         from . import share

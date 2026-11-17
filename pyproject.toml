@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "raja-capture"
-version = "0.2.0"
+version = "0.3.0"
 description = "Raja Capture - aplikasi screen capture, anotasi, dan perekam layar lintas platform"
 readme = "README.md"
 license = "MIT"

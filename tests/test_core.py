@@ -1,4 +1,5 @@
 import os
+import sys
 import tempfile
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -331,3 +332,114 @@ def test_magnifier_not_dimmed_during_selection(qapp):
     g = ov.grab().toImage()
     assert g.pixelColor(134, 134).name() == "#ffffff"
     ctrl.cancel()
+
+
+# ----------------------------------------------------------------------------- updater
+
+def test_version_compare():
+    from raja_capture import updater
+
+    assert updater.parse_version("v1.2.3") == (1, 2, 3)
+    assert updater.parse_version("0.4") == (0, 4, 0)
+    assert updater.is_newer("v0.10.0", "0.9.9")
+    assert not updater.is_newer("v0.3.0", "0.3.0")
+    assert not updater.is_newer("0.2.9", "0.3.0")
+
+
+def test_pick_asset_and_kind(monkeypatch):
+    from raja_capture import updater
+
+    assets = [{"name": n, "url": "u", "size": 1, "digest": ""} for n in (
+        "raja-capture_0.3.0_amd64.deb", "RajaCapture-0.3.0-setup.exe",
+        "RajaCapture-0.3.0-windows-portable.zip", "RajaCapture-0.3.0-x86_64.AppImage")]
+    assert updater.pick_asset("deb", assets)["name"].endswith(".deb")
+    assert updater.pick_asset("windows-installer", assets)["name"].endswith("setup.exe")
+    assert updater.pick_asset("appimage", assets)["name"].endswith(".AppImage")
+    assert updater.pick_asset("source", assets) is None
+    monkeypatch.delenv("APPIMAGE", raising=False)
+    assert updater.install_kind() == "source"
+    monkeypatch.setenv("APPIMAGE", "/tmp/x.AppImage")
+    assert updater.install_kind() == "appimage"
+
+
+def _serve_bytes(payload: bytes):
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *a):
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+def test_download_verifies_sha256_and_appimage_replace(tmp_path, monkeypatch):
+    import hashlib
+
+    from raja_capture import updater
+
+    payload = b"#!/bin/sh\necho new\n" * 1000
+    srv = _serve_bytes(payload)
+    url = f"http://127.0.0.1:{srv.server_port}/RajaCapture-9.9.9-x86_64.AppImage"
+    good = {"name": "RajaCapture-9.9.9-x86_64.AppImage", "url": url, "size": len(payload),
+            "digest": "sha256:" + hashlib.sha256(payload).hexdigest()}
+    seen = []
+    path = updater.download(good, str(tmp_path / "dl"), progress=lambda d, t: seen.append((d, t)))
+    assert open(path, "rb").read() == payload and seen[-1] == (len(payload), len(payload))
+
+    bad = dict(good, digest="sha256:" + "0" * 64)
+    with pytest.raises(updater.UpdateError):
+        updater.download(bad, str(tmp_path / "dl2"))
+    assert not list((tmp_path / "dl2").iterdir())  # partial file removed
+
+    # AppImage: atomic replace of the running image + relaunch command
+    old = tmp_path / "Raja.AppImage"
+    old.write_bytes(b"old")
+    monkeypatch.setenv("APPIMAGE", str(old))
+    dest = updater.appimage_download_dir()
+    new = updater.download(good, dest)
+    cmd = updater.apply_update("appimage", new)
+    srv.shutdown()
+    assert cmd == [str(old)]
+    assert old.read_bytes() == payload and os.access(old, os.X_OK)
+    assert not os.path.exists(dest)
+
+
+def test_update_dialog_builds(qapp):
+    from raja_capture.ui.update_dialog import UpdateDialog
+
+    info = {"version": "9.9.9", "notes": "### Added\n- Something new", "url": "http://x", "assets": []}
+    dlg = UpdateDialog(info, "appimage")
+    assert dlg.auto
+    dlg2 = UpdateDialog(info, "source")
+    assert not dlg2.auto
+
+
+def test_changelog_in_sync():
+    import subprocess
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    res = subprocess.run([sys.executable, os.path.join(root, "packaging", "changelog.py"), "check"],
+                         capture_output=True, text=True)
+    assert res.returncode == 0, res.stderr + res.stdout
+
+
+def test_registered_app_id(tmp_path, monkeypatch):
+    from raja_capture.capture import portal
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_DATA_DIRS", str(tmp_path / "sys"))
+    assert portal.registered_app_id() == ""
+    assert portal.screenshot_permission("") == "yes"
+    apps = tmp_path / "sys" / "applications"
+    apps.mkdir(parents=True)
+    (apps / "raja-capture.desktop").write_text("[Desktop Entry]\n")
+    assert portal.registered_app_id() == "raja-capture"

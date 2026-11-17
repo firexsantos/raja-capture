@@ -28,6 +28,66 @@ SCREENSHOT = "org.freedesktop.portal.Screenshot"
 SCREENCAST = "org.freedesktop.portal.ScreenCast"
 
 
+class PortalAccessDenied(CaptureError):
+    """The portal refused (typically: permission dialog could not be shown/was denied)."""
+
+
+APP_ID = "raja-capture"
+PERM_BUS = "org.freedesktop.impl.portal.PermissionStore"
+PERM_PATH = "/org/freedesktop/impl/portal/PermissionStore"
+
+
+def registered_app_id() -> str:
+    """App id the portal sees for us: 'raja-capture' when a .desktop file is installed
+    (Qt registers it with the host Registry), otherwise '' (unregistered host app)."""
+    dirs = [os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")]
+    dirs += (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":")
+    for d in dirs:
+        if d and os.path.exists(os.path.join(d, "applications", f"{APP_ID}.desktop")):
+            return APP_ID
+    return ""
+
+
+def screenshot_permission(app_id: str | None = None) -> str | None:
+    """'yes' / 'no' / None (never asked) for non-interactive screenshots."""
+    if not HAVE_JEEPNEY:
+        return "yes"
+    app_id = registered_app_id() if app_id is None else app_id
+    if not app_id:
+        return "yes"  # unregistered host apps are allowed without a dialog
+    try:
+        conn = open_dbus_connection(bus="SESSION")
+    except Exception:  # noqa: BLE001
+        return None
+    try:
+        msg = new_method_call(DBusAddress(PERM_PATH, bus_name=PERM_BUS,
+                                          interface="org.freedesktop.impl.portal.PermissionStore"),
+                              "Lookup", "ss", ("screenshot", "screenshot"))
+        reply = conn.send_and_get_reply(msg, timeout=5)
+        if reply.header.message_type == MessageType.error:
+            return None
+        perms = reply.body[0]
+        values = perms.get(app_id)
+        return values[0] if values else None
+    except Exception:  # noqa: BLE001
+        return None
+    finally:
+        conn.close()
+
+
+def reset_screenshot_permission(app_id: str = APP_ID) -> bool:
+    """Forget a stored yes/no so GNOME asks again (does not grant anything)."""
+    conn = open_dbus_connection(bus="SESSION")
+    try:
+        msg = new_method_call(DBusAddress(PERM_PATH, bus_name=PERM_BUS,
+                                          interface="org.freedesktop.impl.portal.PermissionStore"),
+                              "DeletePermission", "sss", ("screenshot", "screenshot", app_id))
+        reply = conn.send_and_get_reply(msg, timeout=5)
+        return reply.header.message_type != MessageType.error
+    finally:
+        conn.close()
+
+
 def _addr(interface: str, path: str = OBJ_PATH):
     return DBusAddress(path, bus_name=BUS_NAME, interface=interface)
 
@@ -104,7 +164,13 @@ def screenshot(interactive: bool = False, timeout: float = 300) -> QImage:
             "interactive": ("b", bool(interactive)),
             "modal": ("b", True),
         }
-        results = _request(conn, SCREENSHOT, "Screenshot", "sa{sv}", ("", options), token, timeout)
+        try:
+            results = _request(conn, SCREENSHOT, "Screenshot", "sa{sv}", ("", options), token, timeout)
+        except CaptureError as exc:
+            if not interactive and "(kode 2)" in str(exc):
+                raise PortalAccessDenied(
+                    "GNOME belum mengizinkan Raja Capture mengambil screenshot.") from exc
+            raise
     finally:
         conn.close()
 

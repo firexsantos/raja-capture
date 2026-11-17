@@ -222,6 +222,25 @@ class SettingsDialog(QDialog):
             self.autostart.setEnabled(False)
         self._autostart_initial = self.autostart.isChecked()
         sv.addWidget(self.autostart)
+        from .. import __version__, updater
+
+        self.check_updates = QCheckBox("Periksa pembaruan otomatis")
+        self.check_updates.setChecked(cfg.get("check_updates"))
+        upd_row = QHBoxLayout()
+        upd_row.addWidget(self.check_updates)
+        upd_row.addStretch(1)
+        check_now = QPushButton("Cek sekarang")
+        if getattr(app, "updates", None) is not None:
+            check_now.clicked.connect(lambda: app.updates.check(manual=True))
+        else:
+            check_now.setEnabled(False)
+        upd_row.addWidget(check_now)
+        sv.addLayout(upd_row)
+        kind_label = {"windows-installer": "installer Windows (upgrade otomatis)",
+                      "appimage": "AppImage (upgrade otomatis)", "deb": "paket .deb (upgrade otomatis)",
+                      "portable": "portable (unduh manual)", "source": "source code (git pull)"}
+        sv.addWidget(QLabel(f"Versi {__version__} · jenis instalasi: "
+                            f"{kind_label.get(updater.install_kind(), '-')}"))
         if IS_LINUX:
             b = QPushButton("Pasang ke menu aplikasi (.desktop)")
             b.clicked.connect(self._install_desktop)
@@ -312,6 +331,7 @@ class SettingsDialog(QDialog):
         c.set("ffmpeg_path", self.ffmpeg.text().strip())
         c.set("ocr_lang", self.ocr_lang.text().strip() or "eng")
         c.set("tesseract_path", self.tess.text().strip())
+        c.set("check_updates", self.check_updates.isChecked())
         c.set("imgur_client_id", self.imgur.text().strip())
         c.set("custom_upload_url", self.up_url.text().strip())
         c.set("custom_upload_field", self.up_field.text().strip() or "file")

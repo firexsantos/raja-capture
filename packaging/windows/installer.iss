@@ -44,6 +44,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 Filename: "{app}\raja-capture.exe"; Description: "{cm:LaunchProgram,Raja Capture}"; Flags: nowait postinstall skipifsilent
+; Silent upgrades started from inside the app: relaunch it afterwards.
+Filename: "{app}\raja-capture.exe"; Flags: nowait runasoriginaluser; Check: WizardSilent
 
 [UninstallRun]
 Filename: "{app}\raja-capture.exe"; Parameters: "--quit"; Flags: runhidden skipifdoesntexist; RunOnceId: "QuitApp"

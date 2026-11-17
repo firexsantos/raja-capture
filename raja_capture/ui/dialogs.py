@@ -231,3 +231,81 @@ class UploadHistoryDialog(QDialog):
         r = self.table.currentRow()
         if r >= 0:
             QGuiApplication.clipboard().setText(self.table.item(r, 2).text())
+
+
+class PermissionDialog(QDialog):
+    """Asks GNOME for screenshot permission while one of our windows has focus.
+
+    GNOME only shows its access dialog for the focused app, so this request must
+    happen from a visible, focused Raja Capture window (not after hiding the toolbar).
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        from ..capture import portal
+        from . import icons
+
+        self.portal = portal
+        self.setWindowTitle("Izin tangkap layar")
+        self.setWindowIcon(icons.app_icon())
+        self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
+        self.setMinimumWidth(460)
+        self.info = QLabel()
+        self.info.setWordWrap(True)
+        self.btn_allow = QPushButton("Izinkan sekarang")
+        self.btn_allow.setDefault(True)
+        self.btn_reset = QPushButton("Reset izin && minta lagi")
+        self.btn_cancel = QPushButton("Batal")
+        self.btn_allow.clicked.connect(self._request)
+        self.btn_reset.clicked.connect(self._reset)
+        self.btn_cancel.clicked.connect(self.reject)
+        row = QHBoxLayout()
+        row.addWidget(self.btn_reset)
+        row.addStretch(1)
+        row.addWidget(self.btn_cancel)
+        row.addWidget(self.btn_allow)
+        lay = QVBoxLayout(self)
+        lay.addWidget(self.info)
+        lay.addLayout(row)
+        self._refresh()
+
+    def _refresh(self):
+        state = self.portal.screenshot_permission()
+        if state == "no":
+            self.info.setText("<b>Izin tangkap layar sebelumnya ditolak.</b><br>Klik <i>Reset izin &amp; "
+                              "minta lagi</i>, lalu pilih <b>Izinkan</b> pada dialog GNOME.")
+            self.btn_reset.show()
+            self.btn_allow.setEnabled(False)
+        else:
+            self.info.setText("<b>Raja Capture perlu izin untuk menangkap layar.</b><br>Ini hanya sekali. "
+                              "Klik <i>Izinkan sekarang</i>, lalu pilih <b>Izinkan</b> (Allow) pada dialog "
+                              "GNOME yang muncul.")
+            self.btn_reset.hide()
+            self.btn_allow.setEnabled(True)
+
+    def _reset(self):
+        try:
+            self.portal.reset_screenshot_permission()
+        except Exception as exc:  # noqa: BLE001
+            self.info.setText(f"Gagal mereset izin: {exc}")
+            return
+        self._refresh()
+        self._request()
+
+    def _request(self):
+        from ..util import run_async
+
+        self.btn_allow.setEnabled(False)
+        self.btn_reset.setEnabled(False)
+        self.info.setText("Menunggu persetujuan… pilih <b>Izinkan</b> pada dialog GNOME.")
+        self.raise_()
+        self.activateWindow()
+        run_async(self.portal.screenshot, False, on_done=lambda _img: self.accept(),
+                  on_error=self._failed)
+
+    def _failed(self, exc):
+        self.btn_reset.setEnabled(True)
+        self._refresh()
+        if self.portal.screenshot_permission() != "no":
+            self.info.setText(f"<b>Izin belum diberikan.</b><br>{exc}<br>Pastikan jendela ini aktif "
+                              "(klik sekali di jendela ini), lalu coba lagi.")
