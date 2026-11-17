@@ -284,14 +284,16 @@ class SelectionOverlay(QWidget):
         qp.end()
 
         info_h = 40
+        info_w = max(size, 210)
         x = self.mouse.x() + 24
         y = self.mouse.y() + 24
-        if x + size > self.width():
-            x = self.mouse.x() - 24 - size
+        if x + info_w > self.width():
+            x = self.mouse.x() - 24 - info_w
         if y + size + info_h > self.height():
             y = self.mouse.y() - 24 - size - info_h
         target = QRect(x, y, size, size)
         p.save()
+        p.setBrush(Qt.NoBrush)  # earlier labels leave a dark brush set; rects must not be filled
         p.setRenderHint(QPainter.SmoothPixmapTransform, False)
         p.drawImage(target, piece)
         if big:
@@ -307,7 +309,7 @@ class SelectionOverlay(QWidget):
         p.setPen(QPen(QColor(255, 255, 255), 2))
         p.drawRect(target)
         color = self.sub.pixelColor(sx, sy)
-        info = QRect(x, y + size, size, info_h)
+        info = QRect(x, y + size, info_w, info_h)
         p.fillRect(info, QColor(20, 20, 20, 225))
         p.fillRect(QRect(info.x() + 6, info.y() + 8, 24, 24), color)
         p.setPen(Qt.white)

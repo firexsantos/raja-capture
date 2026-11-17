@@ -315,3 +315,19 @@ def test_settings_dialog_builds(qapp):
     dlg.audio.setCurrentIndex(dlg.audio.findData("both"))
     dlg.accept()
     assert a.cfg.get("record_audio") == "both"
+
+
+def test_magnifier_not_dimmed_during_selection(qapp):
+    from raja_capture.capture.base import DesktopShot, virtual_geometry
+    from raja_capture.ui.overlay import OverlayController
+
+    vg = virtual_geometry()
+    img = _img(vg.width(), vg.height())  # white
+    ctrl = OverlayController(DesktopShot(img, vg), "region")
+    ctrl.start()
+    ov = ctrl.overlays[0]
+    ov.origin, ov.cur, ov.mouse = QRect(20, 20, 1, 1).topLeft(), QRect(100, 100, 1, 1).topLeft(), \
+        QRect(100, 100, 1, 1).topLeft()
+    g = ov.grab().toImage()
+    assert g.pixelColor(134, 134).name() == "#ffffff"
+    ctrl.cancel()
