@@ -145,3 +145,89 @@ class ColorResultDialog(QDialog):
         lay.addLayout(top)
         lay.addWidget(QLabel("HEX sudah disalin ke clipboard."))
         lay.addLayout(row)
+
+
+class UploadResultDialog(QDialog):
+    def __init__(self, result: dict, parent=None):
+        super().__init__(parent)
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        self.setWindowTitle(f"Upload berhasil - {result.get('service', '')}")
+        self.setAttribute(Qt.WA_DeleteOnClose)
+        self.resize(520, 0)
+        url = result["url"]
+        QGuiApplication.clipboard().setText(url)
+        lay = QVBoxLayout(self)
+        lay.addWidget(QLabel("Link sudah disalin ke clipboard:"))
+        grid = QGridLayout()
+        rows = [("Link", url)]
+        if result.get("delete_url"):
+            rows.append(("Link hapus", result["delete_url"]))
+        for r, (name, val) in enumerate(rows):
+            grid.addWidget(QLabel(name), r, 0)
+            field = QLineEdit(val)
+            field.setReadOnly(True)
+            grid.addWidget(field, r, 1)
+            copy = QPushButton("Salin")
+            copy.clicked.connect(lambda _=False, v=val: QGuiApplication.clipboard().setText(v))
+            grid.addWidget(copy, r, 2)
+            open_btn = QPushButton("Buka")
+            open_btn.clicked.connect(lambda _=False, v=val: QDesktopServices.openUrl(QUrl(v)))
+            grid.addWidget(open_btn, r, 3)
+        lay.addLayout(grid)
+        if result.get("delete_url"):
+            note = QLabel("Simpan link hapus jika ingin menghapus gambar ini nanti "
+                          "(juga tersimpan di Riwayat upload).")
+            note.setWordWrap(True)
+            lay.addWidget(note)
+        close = QPushButton("Tutup")
+        close.clicked.connect(self.close)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        row.addWidget(close)
+        lay.addLayout(row)
+
+
+class UploadHistoryDialog(QDialog):
+    def __init__(self, entries: list[dict], on_clear=None, parent=None):
+        super().__init__(parent)
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtWidgets import QAbstractItemView, QTableWidget, QTableWidgetItem
+
+        self.setWindowTitle("Riwayat upload")
+        self.setAttribute(Qt.WA_DeleteOnClose)
+        self.resize(720, 380)
+        table = QTableWidget(len(entries), 4)
+        table.setHorizontalHeaderLabels(["Waktu", "Layanan", "Link", "Link hapus"])
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        for r, e in enumerate(entries):
+            for c, key in enumerate(("time", "service", "url", "delete_url")):
+                table.setItem(r, c, QTableWidgetItem(str(e.get(key, ""))))
+        table.horizontalHeader().setStretchLastSection(True)
+        table.resizeColumnsToContents()
+        table.cellDoubleClicked.connect(
+            lambda r, c: QDesktopServices.openUrl(QUrl(table.item(r, c).text())) if c >= 2 else None)
+        self.table = table
+        copy = QPushButton("Salin link")
+        copy.clicked.connect(self._copy)
+        clear = QPushButton("Hapus riwayat")
+        clear.clicked.connect(lambda: (on_clear and on_clear(), table.setRowCount(0)))
+        close = QPushButton("Tutup")
+        close.clicked.connect(self.close)
+        row = QHBoxLayout()
+        row.addWidget(clear)
+        row.addStretch(1)
+        row.addWidget(copy)
+        row.addWidget(close)
+        lay = QVBoxLayout(self)
+        lay.addWidget(QLabel("Klik dua kali pada link untuk membukanya di browser."))
+        lay.addWidget(table)
+        lay.addLayout(row)
+
+    def _copy(self):
+        r = self.table.currentRow()
+        if r >= 0:
+            QGuiApplication.clipboard().setText(self.table.item(r, 2).text())

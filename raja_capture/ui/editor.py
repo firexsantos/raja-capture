@@ -46,6 +46,7 @@ from .items import (
     Annotation,
     ArrowItem,
     EllipseItem,
+    HandleItem,
     HighlightItem,
     LineItem,
     PenItem,
@@ -186,6 +187,8 @@ class CanvasView(QGraphicsView):
             self.editor.update_shape(self._drawing, self.editor.tool, self._start, p, shift)
             return
         super().mouseMoveEvent(e)
+        if self._moves:
+            self.editor.position_handles()
 
     def mouseReleaseEvent(self, e):
         if e.button() == Qt.MiddleButton and self._pan_pos is not None:
@@ -257,6 +260,8 @@ class EditorWindow(QMainWindow):
 
         self.undo = QUndoStack(self)
         self.undo.cleanChanged.connect(lambda _c: self._update_title())
+        self.undo.indexChanged.connect(lambda _i: self.update_handles())
+        self._handles: list = []
 
         self.view = CanvasView(self)
         self.setCentralWidget(self.view)
@@ -318,6 +323,15 @@ class EditorWindow(QMainWindow):
         tb.setIconSize(QSize(22, 22))
         for a in (self.a_open, self.a_save, self.a_save_as, self.a_copy, self.a_print):
             tb.addAction(a)
+        self.send_menu = self._build_send_menu()
+        send_btn = QToolButton()
+        send_btn.setIcon(icons.icon("send"))
+        send_btn.setText("Kirim")
+        send_btn.setToolTip("Kirim / upload / buka dengan…")
+        send_btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        send_btn.setPopupMode(QToolButton.InstantPopup)
+        send_btn.setMenu(self.send_menu)
+        tb.addWidget(send_btn)
         tb.addSeparator()
         tb.addAction(self.a_undo)
         tb.addAction(self.a_redo)
@@ -390,6 +404,9 @@ class EditorWindow(QMainWindow):
         m = mb.addMenu("&File")
         for a in (self.a_open, self.a_save, self.a_save_as, None, self.a_copy, self.a_print, None, self.a_close):
             m.addSeparator() if a is None else m.addAction(a)
+        send = mb.addMenu("&Kirim")
+        for a in self.send_menu.actions():
+            send.addAction(a)
         m = mb.addMenu("&Edit")
         for a in (self.a_undo, self.a_redo, None, self.a_delete, self.a_select_all):
             m.addSeparator() if a is None else m.addAction(a)
@@ -495,7 +512,41 @@ class EditorWindow(QMainWindow):
 
         self.undo.push(FuncCommand("Ubah gaya", redo, undo))
 
+    # ------------------------------------------------------------ resize handles
+    def update_handles(self):
+        try:
+            items = self.selected_annotations()
+        except RuntimeError:
+            return
+        target = items[0] if len(items) == 1 and getattr(items[0], "resizable", False) else None
+        current = self._handles[0].target if self._handles else None
+        if target is current and target is not None and all(h.scene() for h in self._handles):
+            self.position_handles()
+            return
+        for h in self._handles:
+            if h.scene() is not None:
+                self.scene.removeItem(h)
+        self._handles = []
+        if target is None or target.scene() is None:
+            return
+        for key, pt in target.control_points().items():
+            h = HandleItem(target, key, self._push_geometry)
+            h.setPos(pt)
+            self.scene.addItem(h)
+            self._handles.append(h)
+
+    def position_handles(self):
+        for h in self._handles:
+            h.setPos(h.target.control_points()[h.key])
+
+    def _push_geometry(self, item, old, new):
+        if old == new:
+            return
+        self.undo.push(FuncCommand("Ubah ukuran objek", lambda: item.set_geometry(new),
+                                   lambda: item.set_geometry(old)))
+
     def _on_selection(self):
+        self.update_handles()
         items = self.selected_annotations()
         if len(items) == 1:
             s = items[0].get_style()
@@ -840,6 +891,120 @@ class EditorWindow(QMainWindow):
             size = img.size()
         p.drawImage(QRectF(0, 0, size.width(), size.height()), img)
         p.end()
+
+    # ------------------------------------------------------------ send / share
+    def _build_send_menu(self) -> QMenu:
+        m = QMenu(self)
+        m.addAction(icons.icon("upload"), "Upload ke Imgur", lambda: self.upload("imgur"))
+        m.addAction(icons.icon("upload"), "Upload ke server kustom", lambda: self.upload("custom"))
+        m.addAction("Riwayat upload…", lambda: self.app.show_upload_history())
+        m.addSeparator()
+        m.addAction("Kirim lewat email (lampiran)", self.send_email)
+        m.addAction(icons.icon("copy"), "Salin sebagai file", self.copy_as_file)
+        m.addSeparator()
+        self.open_with_menu = m.addMenu("Buka dengan")
+        self.open_with_menu.aboutToShow.connect(self._fill_open_with)
+        m.addAction(icons.icon("open"), "Tampilkan di folder", self.reveal)
+        return m
+
+    def share_file(self) -> str:
+        """Current image (with annotations) written to a temp PNG for sharing."""
+        from ..share import share_dir
+
+        self._finish_text_edit()
+        path = next_filename(share_dir(), self.cfg.get("filename_pattern"), "png")
+        if not save_image(self.render_image(), path):
+            raise OSError(f"Gagal menulis {path}")
+        return path
+
+    def upload(self, service: str):
+        from .. import share
+        from .dialogs import UploadResultDialog
+
+        if service == "imgur" and not self.cfg.get("imgur_confirmed"):
+            res = QMessageBox.question(
+                self, "Upload ke Imgur",
+                "Gambar akan diunggah ke Imgur dan bisa dilihat siapa pun yang punya link-nya.\n"
+                "Lanjutkan? (pertanyaan ini tidak akan muncul lagi)")
+            if res != QMessageBox.Yes:
+                return
+            self.cfg.set("imgur_confirmed", True)
+        path = self.share_file()
+        cfg = self.cfg
+        if service == "imgur":
+            fn, args = share.upload_imgur, (path, cfg.get("imgur_client_id"))
+        else:
+            fn, args = share.upload_custom, (path, cfg.get("custom_upload_url"), cfg.get("custom_upload_field"),
+                                             cfg.get("custom_upload_headers"), cfg.get("custom_upload_response"))
+        self.statusBar().showMessage("Mengunggah…")
+        QGuiApplication.setOverrideCursor(Qt.WaitCursor)
+
+        def done(result):
+            QGuiApplication.restoreOverrideCursor()
+            self.statusBar().showMessage("Upload selesai, link disalin", 5000)
+            share.add_history(cfg, result)
+            UploadResultDialog(result, self).show()
+
+        def fail(exc):
+            QGuiApplication.restoreOverrideCursor()
+            self.statusBar().clearMessage()
+            QMessageBox.warning(self, "Upload gagal", str(exc))
+
+        run_async(fn, *args, on_done=done, on_error=fail)
+
+    def send_email(self):
+        from ..share import email_with_attachment
+
+        self.statusBar().showMessage(email_with_attachment(self.share_file()), 6000)
+
+    def copy_as_file(self):
+        from ..share import copy_file_to_clipboard
+
+        copy_file_to_clipboard(self.share_file())
+        self.statusBar().showMessage("File disalin - tempel di aplikasi chat atau file manager", 5000)
+
+    def reveal(self):
+        from ..share import reveal_in_folder
+
+        if self.file_path and os.path.exists(self.file_path):
+            reveal_in_folder(self.file_path)
+        else:
+            reveal_in_folder(self.share_file())
+
+    def _fill_open_with(self):
+        from ..share import external_programs
+
+        m = self.open_with_menu
+        m.clear()
+        m.addAction("Aplikasi bawaan sistem", self._open_default)
+        progs = external_programs(self.cfg)
+        if progs:
+            m.addSeparator()
+        for prog in progs:
+            m.addAction(os.path.basename(prog), lambda p=prog: self._open_with(p))
+        m.addSeparator()
+        m.addAction("Pilih program…", self._choose_program)
+
+    def _open_default(self):
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        QDesktopServices.openUrl(QUrl.fromLocalFile(self.share_file()))
+
+    def _open_with(self, program: str):
+        from ..share import open_with, remember_program
+
+        try:
+            open_with(program, self.share_file())
+            remember_program(self.cfg, program)
+        except OSError as exc:
+            QMessageBox.warning(self, "Buka dengan", f"Gagal menjalankan {program}:\n{exc}")
+
+    def _choose_program(self):
+        start = "/usr/bin" if os.path.isdir("/usr/bin") else ""
+        prog, _ = QFileDialog.getOpenFileName(self, "Pilih program (mis. GIMP)", start)
+        if prog:
+            self._open_with(prog)
 
     def open_file(self):
         path, _ = QFileDialog.getOpenFileName(self, "Buka gambar", self.cfg.get("output_dir"), OPEN_FILTER)

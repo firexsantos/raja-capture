@@ -42,6 +42,20 @@ def platform_label() -> str:
     return "Linux (X11)"
 
 
+def restore_child_environment():
+    """Undo PyInstaller/AppImage library-path changes so child processes (gst-launch, ffmpeg,
+    tesseract, xdg-open, ...) use the system libraries. Safe for this process because the
+    dynamic loader only reads LD_LIBRARY_PATH at startup."""
+    if not getattr(sys, "frozen", False) or IS_WINDOWS:
+        return
+    # Only LD_LIBRARY_PATH: Qt still needs its own plugin paths in this process.
+    orig = os.environ.pop("LD_LIBRARY_PATH_ORIG", None)
+    if orig is not None:
+        os.environ["LD_LIBRARY_PATH"] = orig
+    else:
+        os.environ.pop("LD_LIBRARY_PATH", None)
+
+
 # --------------------------------------------------------------------------- async
 
 
@@ -82,7 +96,7 @@ def run_async(fn, *args, on_done=None, on_error=None, **kwargs):
         _alive.discard(signals)
         if on_error:
             on_error(exc)
-        else:
+        elif sys.stderr is not None:  # None in windowed (no console) builds
             sys.stderr.write(getattr(exc, "__traceback_text__", repr(exc)))
 
     signals.done.connect(_done, Qt.QueuedConnection)

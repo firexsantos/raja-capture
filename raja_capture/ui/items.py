@@ -67,7 +67,91 @@ class Annotation:
         pass
 
 
-class RectItem(QGraphicsRectItem, Annotation):
+RECT_HANDLES = ("tl", "t", "tr", "r", "br", "b", "bl", "l")
+HANDLE_CURSORS = {
+    "tl": Qt.SizeFDiagCursor, "br": Qt.SizeFDiagCursor, "tr": Qt.SizeBDiagCursor,
+    "bl": Qt.SizeBDiagCursor, "t": Qt.SizeVerCursor, "b": Qt.SizeVerCursor,
+    "l": Qt.SizeHorCursor, "r": Qt.SizeHorCursor, "p1": Qt.SizeAllCursor, "p2": Qt.SizeAllCursor,
+}
+
+
+class RectGeometry:
+    """Mixin for rect-based items: 8 resize handles."""
+
+    resizable = True
+
+    def control_points(self) -> dict:
+        r = self.rect()
+        c = r.center()
+        pts = {
+            "tl": r.topLeft(), "t": QPointF(c.x(), r.top()), "tr": r.topRight(),
+            "r": QPointF(r.right(), c.y()), "br": r.bottomRight(), "b": QPointF(c.x(), r.bottom()),
+            "bl": r.bottomLeft(), "l": QPointF(r.left(), c.y()),
+        }
+        return {k: self.mapToScene(v) for k, v in pts.items()}
+
+    def get_geometry(self):
+        return QRectF(self.rect())
+
+    def set_geometry(self, g):
+        self.setRect(QRectF(g))
+
+    def move_control(self, key: str, scene_pt: QPointF, start, shift: bool = False):
+        p = self.mapFromScene(scene_pt)
+        r = QRectF(start)
+        if key in ("tl", "l", "bl"):
+            r.setLeft(p.x())
+        if key in ("tr", "r", "br"):
+            r.setRight(p.x())
+        if key in ("tl", "t", "tr"):
+            r.setTop(p.y())
+        if key in ("bl", "b", "br"):
+            r.setBottom(p.y())
+        if shift and key in ("tl", "tr", "bl", "br"):
+            s = max(abs(r.width()), abs(r.height()))
+            if key in ("tl", "bl"):
+                r.setLeft(r.right() - s if r.width() >= 0 else r.right() + s)
+            else:
+                r.setRight(r.left() + s if r.width() >= 0 else r.left() - s)
+            if key in ("tl", "tr"):
+                r.setTop(r.bottom() - s if r.height() >= 0 else r.bottom() + s)
+            else:
+                r.setBottom(r.top() + s if r.height() >= 0 else r.top() - s)
+        self.setRect(r.normalized())
+
+
+class LineGeometry:
+    """Mixin for line-based items: 2 endpoint handles."""
+
+    resizable = True
+
+    def control_points(self) -> dict:
+        line = self.line()
+        return {"p1": self.mapToScene(line.p1()), "p2": self.mapToScene(line.p2())}
+
+    def get_geometry(self):
+        return QLineF(self.line())
+
+    def set_geometry(self, g):
+        self.setLine(QLineF(g))
+
+    def move_control(self, key: str, scene_pt: QPointF, start, shift: bool = False):
+        p = self.mapFromScene(scene_pt)
+        line = QLineF(start)
+        anchor = line.p2() if key == "p1" else line.p1()
+        if shift:
+            dx, dy = p.x() - anchor.x(), p.y() - anchor.y()
+            length = math.hypot(dx, dy)
+            ang = round(math.atan2(dy, dx) / (math.pi / 4)) * (math.pi / 4)
+            p = QPointF(anchor.x() + length * math.cos(ang), anchor.y() + length * math.sin(ang))
+        if key == "p1":
+            line.setP1(p)
+        else:
+            line.setP2(p)
+        self.setLine(line)
+
+
+class RectItem(RectGeometry, QGraphicsRectItem, Annotation):
     kind = "rect"
 
     def __init__(self, rect: QRectF, **style):
@@ -81,7 +165,7 @@ class RectItem(QGraphicsRectItem, Annotation):
         self.setBrush(QBrush(s["color"]) if s["fill"] else Qt.NoBrush)
 
 
-class EllipseItem(QGraphicsEllipseItem, Annotation):
+class EllipseItem(RectGeometry, QGraphicsEllipseItem, Annotation):
     kind = "ellipse"
 
     def __init__(self, rect: QRectF, **style):
@@ -95,7 +179,7 @@ class EllipseItem(QGraphicsEllipseItem, Annotation):
         self.setBrush(QBrush(s["color"]) if s["fill"] else Qt.NoBrush)
 
 
-class LineItem(QGraphicsLineItem, Annotation):
+class LineItem(LineGeometry, QGraphicsLineItem, Annotation):
     kind = "line"
 
     def __init__(self, line: QLineF, **style):
@@ -122,7 +206,7 @@ class PenItem(QGraphicsPathItem, Annotation):
         self.setBrush(Qt.NoBrush)
 
 
-class ArrowItem(QGraphicsItem, Annotation):
+class ArrowItem(LineGeometry, QGraphicsItem, Annotation):
     kind = "arrow"
 
     def __init__(self, line: QLineF, **style):
@@ -197,7 +281,7 @@ class ArrowItem(QGraphicsItem, Annotation):
                 p.drawEllipse(pt, 5, 5)
 
 
-class HighlightItem(QGraphicsRectItem, Annotation):
+class HighlightItem(RectGeometry, QGraphicsRectItem, Annotation):
     kind = "highlight"
 
     def __init__(self, rect: QRectF, **style):
@@ -220,7 +304,7 @@ class HighlightItem(QGraphicsRectItem, Annotation):
             p.drawRect(self.rect())
 
 
-class PixelateItem(QGraphicsRectItem, Annotation):
+class PixelateItem(RectGeometry, QGraphicsRectItem, Annotation):
     """Pixelates the base screenshot underneath it (for hiding sensitive info)."""
 
     kind = "pixelate"
@@ -346,3 +430,44 @@ class TextItem(QGraphicsTextItem, Annotation):
 
 def is_annotation(item) -> bool:
     return isinstance(item, Annotation)
+
+
+class HandleItem(QGraphicsRectItem):
+    """A resize handle; constant on-screen size regardless of zoom."""
+
+    SIZE = 9
+
+    def __init__(self, target, key: str, on_done):
+        s = self.SIZE
+        super().__init__(-s / 2, -s / 2, s, s)
+        self.target, self.key, self.on_done = target, key, on_done
+        self.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+        self.setZValue(2_000_000)
+        self.setBrush(QColor(255, 255, 255))
+        pen = QPen(QColor(0, 140, 255), 1.5)
+        pen.setCosmetic(True)
+        self.setPen(pen)
+        self.setCursor(HANDLE_CURSORS.get(key, Qt.SizeAllCursor))
+        self._start = None
+
+    def mousePressEvent(self, e):
+        if e.button() != Qt.LeftButton:
+            e.ignore()
+            return
+        self._start = self.target.get_geometry()
+        e.accept()
+
+    def mouseMoveEvent(self, e):
+        if self._start is None:
+            return
+        self.target.move_control(self.key, e.scenePos(), self._start,
+                                 bool(e.modifiers() & Qt.ShiftModifier))
+        if self.scene() is not None:
+            for h in [i for i in self.scene().items() if isinstance(i, HandleItem)]:
+                h.setPos(h.target.control_points()[h.key])
+
+    def mouseReleaseEvent(self, e):
+        if self._start is not None:
+            start, self._start = self._start, None
+            self.on_done(self.target, start, self.target.get_geometry())
+        e.accept()

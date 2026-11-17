@@ -200,3 +200,118 @@ def test_next_filename(tmp_path):
     open(a, "w").close()
     b = next_filename(str(tmp_path), "shot", "png")
     assert a != b and b.endswith("shot_2.png")
+
+
+def test_resize_handles(qapp):
+    from raja_capture.ui.editor import EditorWindow
+    from raja_capture.ui.items import ArrowItem, HandleItem, RectItem
+
+    ed = EditorWindow(_FakeApp(), _img())
+    rect = RectItem(QRectF(10, 10, 50, 40))
+    ed.scene.addItem(rect)
+    rect.setSelected(True)
+    handles = [h for h in ed.scene.items() if isinstance(h, HandleItem)]
+    assert len(handles) == 8
+    br = next(h for h in handles if h.key == "br")
+    start = rect.get_geometry()
+    rect.move_control("br", QPointF(120, 90), start)
+    ed._push_geometry(rect, start, rect.get_geometry())
+    assert rect.rect() == QRectF(10, 10, 110, 80)
+    ed.undo.undo()
+    assert rect.rect() == QRectF(10, 10, 50, 40)
+    assert br.pos() == QPointF(60, 50)  # handles follow undo
+
+    # dragging a corner past the opposite edge flips cleanly
+    rect.move_control("tl", QPointF(100, 100), rect.get_geometry())
+    assert rect.rect() == QRectF(60, 50, 40, 50)
+
+    arrow = ArrowItem(QLineF(0, 0, 50, 0))
+    ed.scene.addItem(arrow)
+    ed.scene.clearSelection()
+    arrow.setSelected(True)
+    assert len([h for h in ed.scene.items() if isinstance(h, HandleItem)]) == 2
+    arrow.move_control("p2", QPointF(40, 38), arrow.get_geometry(), shift=True)
+    l = arrow.line()
+    assert abs(l.dx() - l.dy()) < 1e-6  # snapped to 45°
+
+    ed.scene.clearSelection()
+    assert not [h for h in ed.scene.items() if isinstance(h, HandleItem)]
+    img = ed.render_image()  # handles never appear in exports
+    assert img.width() == 300
+    ed._never_saved = False
+    ed.undo.setClean()
+    ed.close()
+
+
+def test_custom_upload_local_server(qapp, tmp_path):
+    import json as _json
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    from raja_capture import share
+
+    received = {}
+
+    class H(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = self.rfile.read(int(self.headers["Content-Length"]))
+            received["auth"] = self.headers.get("Authorization")
+            received["has_file"] = b'name="image"; filename="pic.png"' in body and b"PNGDATA" in body
+            out = _json.dumps({"data": {"url": "http://x/abc.png"}}).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+
+        def log_message(self, *a):
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.handle_request, daemon=True).start()
+    f = tmp_path / "pic.png"
+    f.write_bytes(b"PNGDATA")
+    res = share.upload_custom(str(f), f"http://127.0.0.1:{srv.server_port}/up", "image",
+                              '{"Authorization": "Bearer t"}', "data.url")
+    srv.server_close()
+    assert res["url"] == "http://x/abc.png"
+    assert received == {"auth": "Bearer t", "has_file": True}
+
+    with pytest.raises(share.ShareError):
+        share.upload_custom(str(f), "ftp://nope", "file", "", "")
+    with pytest.raises(share.ShareError):
+        share.upload_imgur(str(f), "")
+
+
+def test_share_helpers(qapp, tmp_path):
+    from raja_capture import share
+    from raja_capture.config import Config
+
+    cfg = Config()
+    share.add_history(cfg, {"url": "http://a", "service": "X", "delete_url": ""})
+    assert share.history(cfg)[0]["url"] == "http://a"
+    f = tmp_path / "a.png"
+    f.write_bytes(b"x")
+    share.copy_file_to_clipboard(str(f))
+    urls = qapp.clipboard().mimeData().urls()
+    assert urls and urls[0].toLocalFile() == str(f)
+    share.remember_program(cfg, "/usr/bin/gimp")
+    assert share.external_programs(cfg)[0] == "/usr/bin/gimp"
+
+
+def test_settings_dialog_builds(qapp):
+    from raja_capture.capture import create_backend
+    from raja_capture.config import Config
+    from raja_capture.hotkeys import HotkeyManager
+    from raja_capture.ui.settings_dialog import SettingsDialog
+
+    class A:
+        pass
+
+    a = A()
+    a.cfg = Config()
+    a.backend = create_backend()
+    a.hotkeys = HotkeyManager(a.cfg)
+    dlg = SettingsDialog(a)
+    dlg.audio.setCurrentIndex(dlg.audio.findData("both"))
+    dlg.accept()
+    assert a.cfg.get("record_audio") == "both"

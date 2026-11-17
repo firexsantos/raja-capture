@@ -15,10 +15,22 @@ penggaris layar. Dibangun dengan Python + PySide6 (Qt 6).
 | Crop, ubah ukuran, putar, balik, bingkai, undo/redo | ✅ | ✅ | ✅ |
 | Simpan PNG/JPG/BMP/WEBP/PDF, salin, cetak | ✅ | ✅ | ✅ |
 | Rekam layar ke MP4 | ✅ portal + GStreamer | ✅ ffmpeg | ✅ ffmpeg |
+| Rekam suara (mikrofon / suara sistem / keduanya) | ✅ PipeWire/Pulse | ✅ Pulse | ✅ DirectShow (Stereo Mix) |
+| Ubah ukuran objek anotasi (handle) | ✅ | ✅ | ✅ |
+| Kirim: upload Imgur / server kustom, email, buka dengan, salin sebagai file | ✅ | ✅ | ✅ |
 | Pemilih warna (kaca pembesar) & penggaris | ✅ | ✅ | ✅ |
 | OCR (Tesseract) | ✅ | ✅ | ✅ |
 | Shortcut global | ✅ via shortcut GNOME | ✅ pynput / GNOME | ✅ RegisterHotKey |
 | Tray + toolbar melayang | ✅ | ✅ | ✅ |
+
+## Unduh
+
+Paket siap pakai dibuat otomatis oleh GitHub Actions (tab **Actions** → artefak, atau
+halaman **Releases** untuk tag `v*`):
+
+* **Linux:** `RajaCapture-<versi>-x86_64.AppImage` (jalankan langsung) atau
+  `raja-capture_<versi>_amd64.deb` (`sudo apt install ./raja-capture_*.deb`)
+* **Windows:** `RajaCapture-<versi>-setup.exe` (installer) atau `…-windows-portable.zip`
 
 ## Instalasi (mode pengembangan)
 
@@ -61,6 +73,32 @@ Di layar pemilihan: seret = area, klik = jendela (mode jendela), `Enter` = selur
 `Esc`/klik kanan = batal. Di editor: tombol huruf memilih alat (V, A, L, R, E, H, P, T, N, B, C),
 `Shift` saat menggambar = lurus/persegi, `Ctrl+scroll` = zoom, klik tengah = geser.
 
+## Upload & kirim
+
+Menu **Kirim** di editor: upload ke Imgur (isi *Client ID* gratis di Pengaturan → Kirim),
+upload ke server sendiri (POST multipart; atur URL, nama field, header JSON, dan lokasi link
+di jawaban JSON, mis. `data.url`), kirim email dengan lampiran, buka dengan program lain
+(mis. GIMP), salin sebagai file, dan riwayat upload (beserta link hapus Imgur).
+
+## Membangun paket
+
+```bash
+.venv/bin/pip install pyinstaller
+PYTHON=.venv/bin/python packaging/build_linux.sh          # AppImage + .deb  -> dist/
+SKIP_APPIMAGE=1 PYTHON=.venv/bin/python packaging/build_linux.sh   # .deb saja
+```
+
+Windows (PowerShell):
+
+```powershell
+pip install . pyinstaller
+python packaging\make_icons.py
+python -m PyInstaller --noconfirm packaging\raja-capture.spec
+iscc /DAppVersion=0.2.0 packaging\windows\installer.iss   # butuh Inno Setup 6
+```
+
+Push tag `v0.2.0` untuk membuat GitHub Release berisi semua paket secara otomatis.
+
 ## Struktur kode
 
 ```
@@ -73,7 +111,10 @@ raja_capture/
   ui/scroll_capture.py + stitch.py   tangkap scroll & penyambungan gambar
   recorder.py         perekam layar (GStreamer/ffmpeg)
   hotkeys.py, ipc.py  shortcut global & single-instance
+  share.py            upload (Imgur/kustom), email, buka dengan, salin file
   ocr.py, imageio.py, system.py
+packaging/            spec PyInstaller, skrip AppImage/.deb, installer Inno Setup
+.github/workflows/    CI: tes + build Linux & Windows + rilis
 tests/                pytest (berjalan offscreen)
 ```
 
@@ -85,4 +126,6 @@ Menjalankan tes: `.venv/bin/pip install pytest && .venv/bin/python -m pytest -q`
   tersedia (scroll manual saja); rekam area memotong stream monitor sehingga paling akurat
   pada satu monitor. GNOME menampilkan izin berbagi layar sekali, lalu pilihan diingat.
 * macOS: tangkap & editor berjalan lewat Qt, perekaman belum didukung.
-* Paket installer (PyInstaller/MSI/AppImage) belum dibuat.
+* Windows: suara sistem butuh perangkat loopback seperti "Stereo Mix" (aktifkan di
+  pengaturan Sound) karena ffmpeg/DirectShow tidak merekam output secara langsung.
+* Paket berukuran besar (~70 MB .deb, ~230 MB terpasang) karena membawa Qt dan Python.

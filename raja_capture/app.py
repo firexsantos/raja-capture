@@ -29,7 +29,7 @@ from .imageio import OPEN_FILTER, save_image
 from .ipc import IpcServer, send_to_running
 from .recorder import Recorder
 from .ui import icons
-from .util import is_gnome, is_wayland, run_async
+from .util import is_gnome, is_wayland, restore_child_environment, run_async
 
 CAPTURE_ACTIONS = [a for a, _, _ in ACTIONS]
 
@@ -133,6 +133,7 @@ class RajaApp(QObject):
         menu.addAction(icons.icon("open"), "Buka gambar…", self.open_image_dialog)
         menu.addAction("Buka folder hasil", lambda: QDesktopServices.openUrl(
             QUrl.fromLocalFile(self.cfg.get("output_dir"))))
+        menu.addAction("Riwayat upload…", self.show_upload_history)
         menu.addSeparator()
         menu.addAction("Tampilkan toolbar", self.show_toolbar)
         menu.addAction(icons.icon("settings"), "Pengaturan…", self.show_settings)
@@ -401,6 +402,15 @@ class RajaApp(QObject):
         if path:
             self.open_image_file(path)
 
+    def show_upload_history(self):
+        from . import share
+        from .ui.dialogs import UploadHistoryDialog
+
+        dlg = UploadHistoryDialog(share.history(self.cfg),
+                                  on_clear=lambda: self.cfg.set("upload_history", "[]"))
+        self._keep(dlg)
+        dlg.show()
+
     def show_settings(self):
         from .ui.settings_dialog import SettingsDialog
 
@@ -447,6 +457,7 @@ def _parse_args(argv):
 
 def main(argv=None):
     args = _parse_args(sys.argv[1:] if argv is None else argv)
+    restore_child_environment()
     QApplication.setApplicationName(APP_NAME)
     QApplication.setOrganizationName("RajaCapture")
     QApplication.setApplicationVersion(__version__)

@@ -272,6 +272,17 @@ def _draw(name: str, p: QPainter, fg: QColor):
         p.setPen(QPen(RED, 2.4, Qt.SolidLine, Qt.RoundCap))
         p.drawLine(QPointF(6, 6), QPointF(18, 18))
         p.drawLine(QPointF(18, 6), QPointF(6, 18))
+    elif name in ("send", "upload"):
+        if name == "upload":
+            p.drawPolyline(QPolygonF([QPointF(4, 15), QPointF(4, 20), QPointF(20, 20), QPointF(20, 15)]))
+            p.setPen(QPen(ACCENT, 2.2, Qt.SolidLine, Qt.RoundCap))
+            p.drawLine(QPointF(12, 16), QPointF(12, 6))
+            _arrow_head(p, QPointF(12, 3), QPointF(12, 16), 7)
+        else:
+            poly = QPolygonF([QPointF(3, 11), QPointF(21, 3), QPointF(14, 21), QPointF(11, 13)])
+            p.setBrush(QColor(ACCENT.red(), ACCENT.green(), ACCENT.blue(), 90))
+            p.drawPolygon(poly)
+            p.drawLine(QPointF(11, 13), QPointF(21, 3))
     elif name == "fill":
         p.setBrush(QColor(fg.red(), fg.green(), fg.blue(), 140))
         p.drawRoundedRect(QRectF(4, 6, 16, 12), 2, 2)

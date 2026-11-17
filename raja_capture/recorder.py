@@ -29,6 +29,85 @@ def _even(v: int) -> int:
     return max(2, v - (v % 2))
 
 
+AUDIO_MODES = [
+    ("none", "Tanpa suara"),
+    ("mic", "Mikrofon"),
+    ("system", "Suara sistem"),
+    ("both", "Mikrofon + suara sistem"),
+]
+
+
+def _gst_has(element: str) -> bool:
+    exe = shutil.which("gst-inspect-1.0")
+    if not exe:
+        return False
+    return subprocess.run([exe, element], capture_output=True).returncode == 0
+
+
+def gst_audio_branch(mode: str) -> list[str]:
+    """gst-launch tokens adding audio (PulseAudio/PipeWire) into ``mux.``; [] for none."""
+    if mode not in ("mic", "system", "both"):
+        return []
+    enc = next((e for e in ("voaacenc", "avenc_aac", "fdkaacenc") if _gst_has(e)), None)
+    if enc is None:
+        raise RecorderError("Encoder AAC GStreamer tidak ada. Pasang gstreamer1.0-plugins-bad "
+                            "atau gstreamer1.0-libav untuk merekam suara.")
+    caps = "audio/x-raw,rate=48000,channels=2"
+
+    def src(device: str | None, sink: str) -> list[str]:
+        el = ["pulsesrc", "do-timestamp=true"] + ([f"device={device}"] if device else [])
+        return el + ["!", "audioconvert", "!", "audioresample", "!", caps, "!", "queue", "!", sink]
+
+    tail = ["audioconvert", "!", enc, "bitrate=160000", "!", "aacparse", "!", "queue", "!", "mux."]
+    if mode == "both":
+        return (src(None, "mix.") + src("@DEFAULT_MONITOR@", "mix.")
+                + ["audiomixer", "name=mix", "!"] + tail)
+    device = "@DEFAULT_MONITOR@" if mode == "system" else None
+    out = src(device, "aenc.")
+    # route single source straight into the encoder chain
+    return out[:-1] + tail
+
+
+def list_dshow_audio_devices(ffmpeg: str) -> list[str]:
+    """Windows: audio capture devices known to DirectShow."""
+    import re
+
+    try:
+        res = subprocess.run([ffmpeg, "-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy"],
+                             capture_output=True, text=True, timeout=20,
+                             creationflags=0x08000000 if IS_WINDOWS else 0)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    return re.findall(r'"([^"]+)"\s+\(audio\)', res.stderr)
+
+
+def ffmpeg_audio_args(cfg) -> tuple[list[str], list[str]]:
+    """Return (input args, output/mapping args) for the configured audio mode."""
+    mode = cfg.get("record_audio")
+    if mode not in ("mic", "system", "both"):
+        return [], []
+    inputs: list[list[str]] = []
+    if IS_WINDOWS:
+        mic, system = cfg.get("audio_mic_device"), cfg.get("audio_system_device")
+        wanted = {"mic": [mic], "system": [system], "both": [mic, system]}[mode]
+        for dev in wanted:
+            if not dev:
+                raise RecorderError("Pilih perangkat audio (DirectShow) di Pengaturan → Rekam & OCR. "
+                                    "Untuk suara sistem gunakan 'Stereo Mix' atau perangkat loopback.")
+            inputs.append(["-f", "dshow", "-thread_queue_size", "512", "-i", f"audio={dev}"])
+    else:
+        devs = {"mic": ["default"], "system": ["@DEFAULT_MONITOR@"],
+                "both": ["default", "@DEFAULT_MONITOR@"]}[mode]
+        for dev in devs:
+            inputs.append(["-f", "pulse", "-thread_queue_size", "512", "-i", dev])
+    flat = [a for group in inputs for a in group]
+    if len(inputs) == 2:
+        out = ["-filter_complex", "[1:a][2:a]amix=inputs=2:duration=longest[a]", "-map", "0:v", "-map", "[a]"]
+    else:
+        out = ["-map", "0:v", "-map", "1:a"]
+    return flat, out + ["-c:a", "aac", "-b:a", "160k"]
+
+
 class Recorder(QObject):
     started = Signal()
     finished = Signal(str)  # output path
@@ -118,7 +197,9 @@ class Recorder(QObject):
                 cmd += ["!", "videocrop", f"left={l}", f"top={t}", f"right={r}", f"bottom={b}"]
             cmd += ["!", "videoconvert", "!", "video/x-raw,format=I420", "!", "x264enc",
                     "speed-preset=veryfast", "tune=zerolatency", "bitrate=6000", "key-int-max=60", "!",
-                    "h264parse", "!", "mp4mux", "!", "filesink", f"location={self.path}"]
+                    "h264parse", "!", "queue", "!", "mux."]
+            cmd += gst_audio_branch(self.cfg.get("record_audio"))
+            cmd += ["mp4mux", "name=mux", "!", "filesink", f"location={self.path}"]
             with open(self.log_path, "w") as log:
                 proc = subprocess.Popen(cmd, pass_fds=(session.fd,), stdin=subprocess.DEVNULL,
                                         stdout=log, stderr=subprocess.STDOUT)
@@ -151,8 +232,10 @@ class Recorder(QObject):
             display = os.environ.get("DISPLAY", ":0")
             src = ["-f", "x11grab", "-framerate", str(fps), "-draw_mouse", cursor, "-video_size",
                    f"{w}x{h}", "-i", f"{display}+{x},{y}"]
-        cmd = [exe, "-y", "-hide_banner", "-loglevel", "warning", *src, "-c:v", "libx264", "-preset",
-               "veryfast", "-pix_fmt", "yuv420p", "-movflags", "+faststart", self.path]
+        audio_in, audio_out = ffmpeg_audio_args(self.cfg)
+        cmd = [exe, "-y", "-hide_banner", "-loglevel", "warning", "-thread_queue_size", "512", *src,
+               *audio_in, *audio_out, "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+               "-movflags", "+faststart", self.path]
         flags = 0x08000000 if IS_WINDOWS else 0  # CREATE_NO_WINDOW
         with open(self.log_path, "w") as log:
             return subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT,

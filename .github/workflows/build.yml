@@ -1,0 +1,100 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: System libraries for Qt
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libxkbcommon-x11-0 libfontconfig1 libdbus-1-3 libxcb-cursor0
+      - run: pip install -e . pytest
+      - run: python -m pytest -q
+        env:
+          QT_QPA_PLATFORM: offscreen
+
+  linux:
+    needs: test
+    runs-on: ubuntu-22.04  # older glibc = runs on more distros
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libxkbcommon-x11-0 libfontconfig1 libdbus-1-3 libxcb-cursor0 file
+      - run: pip install . pyinstaller
+      - run: bash packaging/build_linux.sh
+        env:
+          PYTHON: python
+          QT_QPA_PLATFORM: offscreen
+      - uses: actions/upload-artifact@v4
+        with:
+          name: raja-capture-linux
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+
+  windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install . pyinstaller
+      - name: Icons
+        run: python packaging/make_icons.py
+      - name: PyInstaller
+        run: python -m PyInstaller --noconfirm --clean --distpath dist --workpath build/pyinstaller packaging/raja-capture.spec
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          $p = Start-Process dist\raja-capture\raja-capture.exe -ArgumentList "--tray" -PassThru
+          Start-Sleep -Seconds 8
+          if ($p.HasExited) { throw "raja-capture.exe exited early (code $($p.ExitCode))" }
+          Start-Process dist\raja-capture\raja-capture.exe -ArgumentList "--quit" -Wait
+          Start-Sleep -Seconds 3
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+      - name: Installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $version = python -c "import raja_capture; print(raja_capture.__version__)"
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) { choco install innosetup -y --no-progress }
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          & $iscc "/DAppVersion=$version" packaging\windows\installer.iss
+          Compress-Archive -Path dist\raja-capture\* -DestinationPath "dist\RajaCapture-$version-windows-portable.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: raja-capture-windows
+          path: |
+            dist/*-setup.exe
+            dist/*-portable.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true

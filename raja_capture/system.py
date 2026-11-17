@@ -13,12 +13,27 @@ ASSET_ICON = Path(__file__).parent / "assets" / "raja-capture.svg"
 
 def launcher_argv() -> list[str]:
     """Command that starts Raja Capture (used for shortcuts / autostart)."""
+    if os.environ.get("APPIMAGE"):
+        return [os.environ["APPIMAGE"]]  # stable path; sys.executable lives in a temp mount
     if getattr(sys, "frozen", False):
         return [sys.executable]
     script = Path(sys.executable).with_name("raja-capture" + (".exe" if IS_WINDOWS else ""))
     if script.exists():
         return [str(script)]
     return [sys.executable, "-m", "raja_capture"]
+
+
+def _installed_icon() -> str:
+    """Copy the icon to the user's icon theme so .desktop files survive AppImage unmounts."""
+    if not IS_LINUX:
+        return str(ASSET_ICON)
+    target = Path.home() / ".local/share/icons/hicolor/scalable/apps/raja-capture.svg"
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(ASSET_ICON.read_bytes())
+        return "raja-capture"
+    except OSError:
+        return str(ASSET_ICON)
 
 
 def _desktop_entry(extra_args: str = "") -> str:
@@ -32,7 +47,7 @@ def _desktop_entry(extra_args: str = "") -> str:
         "GenericName=Screen Capture\n"
         "Comment=Tangkap layar, anotasi, dan rekam layar\n"
         f"Exec={exec_line}\n"
-        f"Icon={ASSET_ICON}\n"
+        f"Icon={_installed_icon()}\n"
         "Terminal=false\n"
         "Categories=Graphics;Utility;\n"
         "Keywords=screenshot;capture;screen;record;ocr;\n"

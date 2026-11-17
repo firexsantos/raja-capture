@@ -146,6 +146,24 @@ class SettingsDialog(QDialog):
         self.rec_cursor = QCheckBox("Rekam kursor mouse")
         self.rec_cursor.setChecked(cfg.get("record_cursor"))
         rf.addRow("", self.rec_cursor)
+        from ..recorder import AUDIO_MODES
+
+        self.audio = QComboBox()
+        for key, label in AUDIO_MODES:
+            self.audio.addItem(label, key)
+        self.audio.setCurrentIndex(max(0, self.audio.findData(cfg.get("record_audio"))))
+        rf.addRow("Suara", self.audio)
+        if IS_WINDOWS:
+            self.mic_dev = QComboBox()
+            self.sys_dev = QComboBox()
+            for combo, key in ((self.mic_dev, "audio_mic_device"), (self.sys_dev, "audio_system_device")):
+                combo.setEditable(True)
+                combo.setCurrentText(cfg.get(key))
+            detect = QPushButton("Deteksi perangkat")
+            detect.clicked.connect(self._detect_audio)
+            rf.addRow("Mikrofon (DirectShow)", self.mic_dev)
+            rf.addRow("Suara sistem (Stereo Mix)", self.sys_dev)
+            rf.addRow("", detect)
         self.ffmpeg = QLineEdit(cfg.get("ffmpeg_path"))
         self.ffmpeg.setPlaceholderText("otomatis dari PATH")
         rf.addRow("ffmpeg (Windows/X11)", _file_row(self.ffmpeg, self))
@@ -168,6 +186,31 @@ class SettingsDialog(QDialog):
         langs_label.setWordWrap(True)
         rf.addRow("", langs_label)
         tabs.addTab(r, "Rekam & OCR")
+
+        # --- Sharing
+        u = QWidget()
+        uf = QFormLayout(u)
+        self.imgur = QLineEdit(cfg.get("imgur_client_id"))
+        self.imgur.setPlaceholderText("Client ID dari api.imgur.com/oauth2/addclient")
+        uf.addRow("Imgur Client ID", self.imgur)
+        info = QLabel('<a href="https://api.imgur.com/oauth2/addclient">Daftar aplikasi Imgur</a> '
+                      '(gratis, pilih "Anonymous usage without user authorization").')
+        info.setOpenExternalLinks(True)
+        info.setWordWrap(True)
+        uf.addRow("", info)
+        uf.addRow(QLabel("<b>Server kustom</b> (POST multipart, mirip ShareX)"))
+        self.up_url = QLineEdit(cfg.get("custom_upload_url"))
+        self.up_url.setPlaceholderText("https://contoh.com/upload")
+        uf.addRow("URL", self.up_url)
+        self.up_field = QLineEdit(cfg.get("custom_upload_field"))
+        uf.addRow("Nama field file", self.up_field)
+        self.up_headers = QLineEdit(cfg.get("custom_upload_headers"))
+        self.up_headers.setPlaceholderText('{"Authorization": "Bearer TOKEN"}')
+        uf.addRow("Header (JSON)", self.up_headers)
+        self.up_resp = QLineEdit(cfg.get("custom_upload_response"))
+        self.up_resp.setPlaceholderText("mis. data.url  (kosong = isi jawaban apa adanya)")
+        uf.addRow("Lokasi link di JSON", self.up_resp)
+        tabs.addTab(u, "Kirim")
 
         # --- System
         s = QWidget()
@@ -198,6 +241,26 @@ class SettingsDialog(QDialog):
         lay = QVBoxLayout(self)
         lay.addWidget(tabs)
         lay.addWidget(buttons)
+
+    def _detect_audio(self):
+        import shutil
+
+        from ..recorder import list_dshow_audio_devices
+
+        exe = self.ffmpeg.text().strip() or shutil.which("ffmpeg")
+        devices = list_dshow_audio_devices(exe) if exe else []
+        if not devices:
+            QMessageBox.information(self, "Audio", "Tidak ada perangkat audio terdeteksi (perlu ffmpeg). "
+                                    "Untuk suara sistem aktifkan 'Stereo Mix' di pengaturan Sound Windows.")
+            return
+        for combo in (self.mic_dev, self.sys_dev):
+            current = combo.currentText()
+            combo.clear()
+            combo.addItems(devices)
+            combo.setCurrentText(current)
+        for d in devices:
+            if "stereo mix" in d.lower() or "loopback" in d.lower():
+                self.sys_dev.setCurrentText(d)
 
     def _save_hotkeys(self):
         for action, e in self.key_edits.items():
@@ -242,9 +305,18 @@ class SettingsDialog(QDialog):
         c.set("scroll_interval_ms", self.scroll_ms.value())
         c.set("record_fps", self.fps.value())
         c.set("record_cursor", self.rec_cursor.isChecked())
+        c.set("record_audio", self.audio.currentData())
+        if IS_WINDOWS:
+            c.set("audio_mic_device", self.mic_dev.currentText().strip())
+            c.set("audio_system_device", self.sys_dev.currentText().strip())
         c.set("ffmpeg_path", self.ffmpeg.text().strip())
         c.set("ocr_lang", self.ocr_lang.text().strip() or "eng")
         c.set("tesseract_path", self.tess.text().strip())
+        c.set("imgur_client_id", self.imgur.text().strip())
+        c.set("custom_upload_url", self.up_url.text().strip())
+        c.set("custom_upload_field", self.up_field.text().strip() or "file")
+        c.set("custom_upload_headers", self.up_headers.text().strip())
+        c.set("custom_upload_response", self.up_resp.text().strip())
         self._save_hotkeys()
         if self.autostart.isEnabled() and self.autostart.isChecked() != self._autostart_initial:
             try:
