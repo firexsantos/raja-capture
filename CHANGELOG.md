@@ -4,6 +4,22 @@ All notable changes to Raja Capture are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-11-17
+
+### Added
+- Auto-scroll for scrolling capture on Wayland through the RemoteDesktop portal (GNOME asks
+  once and remembers the choice); the pointer is moved onto the selected area automatically.
+- Scrolling capture can be stopped from the tray (*Hentikan tangkap scroll*) or by pressing
+  the scrolling-capture hotkey again.
+
+### Fixed
+- Scrolling capture on Wayland produced broken results: the control panel and the toolbar
+  appeared inside the captured frames. Both are now hidden while capturing.
+- Frames were grabbed on a fixed timer, sometimes in the middle of a smooth-scroll animation;
+  capture now scrolls, waits for the content to settle, then grabs.
+- Capture stops automatically at the end of the page (or a few seconds after manual scrolling
+  stops), detects an inverted wheel direction and takes smaller steps when it scrolls too far.
+
 ## [0.3.0] - 2026-11-17
 
 ### Added
@@ -43,6 +59,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Screen recording to MP4, colour picker, screen ruler and OCR.
 - System tray, floating toolbar, global hotkeys and single-instance command line.
 
+[0.4.0]: https://github.com/firexsantos/raja-capture/releases/tag/v0.4.0
 [0.3.0]: https://github.com/firexsantos/raja-capture/releases/tag/v0.3.0
 [0.2.0]: https://github.com/firexsantos/raja-capture/releases/tag/v0.2.0
 [0.1.0]: https://github.com/firexsantos/raja-capture/commit/3fa7817

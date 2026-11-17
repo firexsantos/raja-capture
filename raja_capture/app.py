@@ -137,6 +137,9 @@ class RajaApp(QObject):
         menu.addSeparator()
         self.tray_stop = menu.addAction(icons.icon("stop"), "Hentikan rekaman", self.stop_recording)
         self.tray_stop.setVisible(False)
+        self.tray_scroll_stop = menu.addAction(icons.icon("stop"), "Hentikan tangkap scroll",
+                                               lambda: self._scroll and self._scroll.finish())
+        self.tray_scroll_stop.setVisible(False)
         menu.addAction(icons.icon("open"), "Buka gambar…", self.open_image_dialog)
         menu.addAction("Buka folder hasil", lambda: QDesktopServices.openUrl(
             QUrl.fromLocalFile(self.cfg.get("output_dir"))))
@@ -195,6 +198,9 @@ class RajaApp(QObject):
     def start_capture(self, mode: str):
         if mode in ("record_region", "record_full") and self.recorder.is_active():
             self.stop_recording()  # pressing the record hotkey again stops recording
+            return
+        if mode == "scroll" and self._scroll is not None:
+            self._scroll.finish()  # pressing the scroll hotkey again stops it
             return
         if self.busy or self._scroll is not None:
             return
@@ -305,6 +311,10 @@ class RajaApp(QObject):
         ctrl.start()
 
     def _on_region(self, mode, shot, img_rect: QRect, logical: QRect, screen):
+        if mode == "scroll":
+            # keep the toolbar hidden until scrolling capture ends (it would show up in frames)
+            self._restore_after_scroll = self._restore_toolbar
+            self._restore_toolbar = False
         self._end_capture()
         if mode == "scroll":
             self._start_scroll(shot, logical, screen)
@@ -336,15 +346,27 @@ class RajaApp(QObject):
         sess = ScrollCaptureSession(self, logical, screen, shot)
         sess.finished.connect(self._scroll_finished)
         sess.cancelled.connect(self._scroll_cancelled)
+        sess.runningChanged.connect(self._scroll_running)
         self._scroll = sess
         sess.show()
 
+    def _restore_toolbar_after_scroll(self):
+        if getattr(self, "_restore_after_scroll", False):
+            self._restore_after_scroll = False
+            self.toolbar.show()
+
     def _scroll_finished(self, img: QImage):
         self._scroll = None
+        self._restore_toolbar_after_scroll()
         self.deliver(img, "Tangkapan scroll")
 
     def _scroll_cancelled(self):
         self._scroll = None
+        self._restore_toolbar_after_scroll()
+
+    def _scroll_running(self, running: bool):
+        if self.tray is not None:
+            self.tray_scroll_stop.setVisible(running)
 
     # ------------------------------------------------------------ OCR
     def _ocr(self, img: QImage):

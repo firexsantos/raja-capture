@@ -443,3 +443,86 @@ def test_registered_app_id(tmp_path, monkeypatch):
     apps.mkdir(parents=True)
     (apps / "raja-capture.desktop").write_text("[Desktop Entry]\n")
     assert portal.registered_app_id() == "raja-capture"
+
+
+class _FakePageBackend:
+    """Backend whose 'screen' is a window onto a long page; the wheel moves it."""
+
+    name = "fake"
+    can_auto_scroll = True
+
+    def __init__(self, page, view_h, wheel_sign=-1, px_per_click=40):
+        self.page, self.view_h, self.off = page, view_h, 0
+        self.wheel_sign, self.px = wheel_sign, px_per_click
+
+    def scroll(self, x, y, clicks):
+        # wheel_sign=-1: negative clicks scroll down (Windows/X11 convention)
+        delta = clicks * self.px * self.wheel_sign
+        self.off = max(0, min(len(self.page) - self.view_h, self.off + delta))
+
+    def frame(self):
+        from raja_capture.util import array_to_qimage
+
+        return array_to_qimage(self.page[self.off:self.off + self.view_h])
+
+    def grab_async(self, on_done, on_error):
+        from PySide6.QtCore import QTimer
+
+        img = self.frame()
+
+        class Shot:
+            def crop_logical(self, _r):
+                return img
+
+        QTimer.singleShot(0, lambda: on_done(Shot()))
+
+
+def _run_scroll_session(qapp, backend, monkeypatch):
+    from PySide6.QtCore import QEventLoop, QRect, QTimer
+
+    from raja_capture.config import Config
+    from raja_capture.ui import scroll_capture as sc
+
+    monkeypatch.setattr(sc, "is_wayland", lambda: False)
+    monkeypatch.setattr(sc, "SETTLE_MS", 1)
+
+    class App:
+        pass
+
+    app = App()
+    app.cfg, app.backend, app.notify = Config(), backend, lambda *a, **k: None
+    app.cfg.set("scroll_auto", True)
+    first = backend.frame()
+
+    class FirstShot:
+        def crop_logical(self, _r):
+            return first
+
+    sess = sc.ScrollCaptureSession(app, QRect(0, 0, 400, backend.view_h), None, FirstShot())
+    result = []
+    loop = QEventLoop()
+    sess.finished.connect(lambda img: (result.append(img), loop.quit()))
+    sess.cancelled.connect(loop.quit)
+    sess.start()
+    QTimer.singleShot(20000, loop.quit)
+    loop.exec()
+    return result
+
+
+def test_scroll_session_auto_stitches_whole_page(qapp, monkeypatch):
+    from raja_capture.util import qimage_to_array
+
+    page = _page(3000)
+    backend = _FakePageBackend(page, 360)
+    result = _run_scroll_session(qapp, backend, monkeypatch)
+    assert result, "session did not finish"
+    assert np.array_equal(qimage_to_array(result[0]), page)  # stopped exactly at the end
+
+
+def test_scroll_session_detects_reversed_wheel(qapp, monkeypatch):
+    from raja_capture.util import qimage_to_array
+
+    page = _page(1500, seed=3)
+    backend = _FakePageBackend(page, 300, wheel_sign=+1)  # wheel direction inverted
+    result = _run_scroll_session(qapp, backend, monkeypatch)
+    assert result and np.array_equal(qimage_to_array(result[0]), page)

@@ -283,3 +283,99 @@ class ScreenCastSession:
                 except OSError:
                     pass
                 self.fd = None
+
+
+REMOTE = "org.freedesktop.portal.RemoteDesktop"
+
+
+def remote_desktop_available() -> bool:
+    if not HAVE_JEEPNEY:
+        return False
+    try:
+        conn = open_dbus_connection(bus="SESSION")
+    except Exception:  # noqa: BLE001
+        return False
+    try:
+        msg = new_method_call(
+            DBusAddress(OBJ_PATH, bus_name=BUS_NAME, interface="org.freedesktop.DBus.Properties"),
+            "Get", "ss", (REMOTE, "AvailableDeviceTypes"))
+        reply = conn.send_and_get_reply(msg, timeout=5)
+        return reply.header.message_type != MessageType.error and bool(reply.body[0][1] & 2)
+    except Exception:  # noqa: BLE001
+        return False
+    finally:
+        conn.close()
+
+
+class RemoteDesktopSession:
+    """RemoteDesktop portal session used to scroll content during scrolling capture.
+
+    A monitor stream is attached only so the pointer can be moved to the capture area
+    (absolute motion needs a stream); no video is read from it.
+    """
+
+    def __init__(self):
+        if not HAVE_JEEPNEY:
+            raise CaptureError("Paket 'jeepney' belum terpasang")
+        self.conn = open_dbus_connection(bus="SESSION")
+        self.session_handle: str | None = None
+        self.stream: tuple[int, dict] | None = None
+        self.restore_token: str | None = None
+
+    def start(self, restore_token: str | None = None):
+        t = _token()
+        res = _request(self.conn, REMOTE, "CreateSession", "a{sv}",
+                       ({"handle_token": ("s", t), "session_handle_token": ("s", _token())},), t)
+        self.session_handle = res["session_handle"][1]
+        t = _token()
+        opts = {"handle_token": ("s", t), "types": ("u", 2), "persist_mode": ("u", 2)}
+        if restore_token:
+            opts["restore_token"] = ("s", restore_token)
+        _request(self.conn, REMOTE, "SelectDevices", "oa{sv}", (self.session_handle, opts), t)
+        t = _token()
+        _request(self.conn, SCREENCAST, "SelectSources", "oa{sv}",
+                 (self.session_handle, {"handle_token": ("s", t), "types": ("u", 1),
+                                        "multiple": ("b", False)}), t)
+        t = _token()
+        res = _request(self.conn, REMOTE, "Start", "osa{sv}",
+                       (self.session_handle, "", {"handle_token": ("s", t)}), t)
+        devices = res.get("devices", (None, 0))[1]
+        if not devices & 2:
+            raise CaptureError("Izin mengontrol pointer tidak diberikan")
+        streams = res.get("streams", (None, []))[1]
+        if streams:
+            node, props = streams[0]
+            self.stream = (node, {k: v[1] for k, v in props.items()})
+        self.restore_token = res.get("restore_token", (None, None))[1]
+        return self.stream
+
+    def _notify(self, method: str, signature: str, args: tuple):
+        msg = new_method_call(_addr(REMOTE), method, signature, args)
+        _check_reply(self.conn.send_and_get_reply(msg, timeout=5))
+
+    def move_pointer(self, x: float, y: float):
+        """Move the pointer to (x, y) in the attached stream's coordinate space."""
+        if not self.stream:
+            return
+        self._notify("NotifyPointerMotionAbsolute", "oa{sv}udd",
+                     (self.session_handle, {}, self.stream[0], float(x), float(y)))
+
+    def scroll(self, steps: int):
+        """Discrete vertical wheel steps; positive scrolls content down."""
+        self._notify("NotifyPointerAxisDiscrete", "oa{sv}ui", (self.session_handle, {}, 0, int(steps)))
+
+    def close(self):
+        try:
+            if self.session_handle:
+                msg = new_method_call(
+                    DBusAddress(self.session_handle, bus_name=BUS_NAME,
+                                interface="org.freedesktop.portal.Session"), "Close")
+                self.conn.send_and_get_reply(msg, timeout=5)
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            self.session_handle = None
+            try:
+                self.conn.close()
+            except Exception:  # noqa: BLE001
+                pass

@@ -56,6 +56,7 @@ DEFAULTS = {
     "audio_mic_device": "",
     "audio_system_device": "",
     "screencast_token": "",
+    "remote_token": "",
     "ocr_lang": "eng",
     "tesseract_path": "",
     "ffmpeg_path": "",

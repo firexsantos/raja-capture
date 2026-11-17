@@ -47,7 +47,7 @@ desktops through `xdg-desktop-portal`.
 ## Features
 
 **Capture**
-- Full screen, active window, rectangular region and **scrolling capture** (long pages stitched automatically, sticky headers/footers handled)
+- Full screen, active window, rectangular region and **scrolling capture** with auto-scroll (long pages stitched automatically, sticky headers/footers handled, stops at the end of the page)
 - Optional delay timer (3 / 5 / 10 s) for menus and tooltips
 - Frozen-screen region selector with crosshair, live size label and pixel magnifier
 - Multi-monitor and HiDPI aware
@@ -167,7 +167,7 @@ All options live in *Settings* (tray menu or toolbar):
 |---|:---:|:---:|:---:|
 | Full screen / region / delay | ✅ portal | ✅ | ✅ |
 | Window capture | ✅ portal picker | ✅ hover highlight¹ | ✅ hover highlight |
-| Scrolling capture | ✅ manual scroll | ✅ manual + auto¹ | ✅ manual + auto |
+| Scrolling capture | ✅ manual + auto (RemoteDesktop portal) | ✅ manual + auto¹ | ✅ manual + auto |
 | Screen recording + audio | ✅ PipeWire / GStreamer | ✅ ffmpeg | ✅ ffmpeg² |
 | Global hotkeys | ✅ via GNOME shortcuts | ✅ pynput¹ | ✅ native |
 | Editor, OCR, colour picker, ruler, sharing | ✅ | ✅ | ✅ |
@@ -223,6 +223,22 @@ Raja Capture checks for new releases and offers a one-click upgrade from inside 
 (tray menu → *Cek pembaruan…*).
 
 <!-- changelog:start -->
+### 0.4.0 — 2026-11-17
+
+#### Added
+- Auto-scroll for scrolling capture on Wayland through the RemoteDesktop portal (GNOME asks
+  once and remembers the choice); the pointer is moved onto the selected area automatically.
+- Scrolling capture can be stopped from the tray (*Hentikan tangkap scroll*) or by pressing
+  the scrolling-capture hotkey again.
+
+#### Fixed
+- Scrolling capture on Wayland produced broken results: the control panel and the toolbar
+  appeared inside the captured frames. Both are now hidden while capturing.
+- Frames were grabbed on a fixed timer, sometimes in the middle of a smooth-scroll animation;
+  capture now scrolls, waits for the content to settle, then grabs.
+- Capture stops automatically at the end of the page (or a few seconds after manual scrolling
+  stops), detects an inverted wheel direction and takes smaller steps when it scrolls too far.
+
 ### 0.3.0 — 2026-11-17
 
 #### Added
@@ -252,15 +268,6 @@ Raja Capture checks for new releases and offers a one-click upgrade from inside 
 #### Fixed
 - Magnifier was dimmed while dragging a selection.
 - Settings tab label "Rekam & OCR" displayed incorrectly.
-
-### 0.1.0 — 2026-11-17
-
-#### Added
-- First release: full screen, window, region and scrolling capture with delay timer.
-- Annotation editor with arrows, shapes, text, highlighter, step numbers and pixelate;
-  crop, resize, rotate, flip, undo/redo; save as PNG/JPG/BMP/WEBP/PDF, copy and print.
-- Screen recording to MP4, colour picker, screen ruler and OCR.
-- System tray, floating toolbar, global hotkeys and single-instance command line.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 <!-- changelog:end -->
