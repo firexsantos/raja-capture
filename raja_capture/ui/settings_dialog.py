@@ -185,7 +185,7 @@ class SettingsDialog(QDialog):
                             else "Tesseract belum terpasang.")
         langs_label.setWordWrap(True)
         rf.addRow("", langs_label)
-        tabs.addTab(r, "Rekam & OCR")
+        tabs.addTab(r, "Rekam && OCR")
 
         # --- Sharing
         u = QWidget()
