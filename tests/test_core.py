@@ -477,7 +477,7 @@ class _FakePageBackend:
         QTimer.singleShot(0, lambda: on_done(Shot()))
 
 
-def _run_scroll_session(qapp, backend, monkeypatch):
+def _run_scroll_session(qapp, backend, monkeypatch, auto=True, notes=None):
     from PySide6.QtCore import QEventLoop, QRect, QTimer
 
     from raja_capture.config import Config
@@ -490,8 +490,10 @@ def _run_scroll_session(qapp, backend, monkeypatch):
         pass
 
     app = App()
-    app.cfg, app.backend, app.notify = Config(), backend, lambda *a, **k: None
-    app.cfg.set("scroll_auto", True)
+    app.cfg, app.backend = Config(), backend
+    app.notify = lambda msg, *a, **k: (notes.append(msg) if notes is not None else None)
+    app.cfg.set("scroll_auto", False)  # stale value written by <=0.4.0 must be ignored
+    app.cfg.set("scroll_autoscroll", auto)
     first = backend.frame()
 
     class FirstShot:
@@ -506,6 +508,7 @@ def _run_scroll_session(qapp, backend, monkeypatch):
     sess.start()
     QTimer.singleShot(20000, loop.quit)
     loop.exec()
+    _run_scroll_session.last = sess
     return result
 
 
@@ -526,3 +529,63 @@ def test_scroll_session_detects_reversed_wheel(qapp, monkeypatch):
     backend = _FakePageBackend(page, 300, wheel_sign=+1)  # wheel direction inverted
     result = _run_scroll_session(qapp, backend, monkeypatch)
     assert result and np.array_equal(qimage_to_array(result[0]), page)
+
+
+class _StuckBackend(_FakePageBackend):
+    def scroll(self, x, y, clicks):  # the page never moves
+        pass
+
+
+class _ChangingBackend(_FakePageBackend):
+    """Every frame is unrelated noise -> frames can never be stitched."""
+
+    def frame(self):
+        from raja_capture.util import array_to_qimage
+
+        self.off += 1
+        return array_to_qimage(_page(self.view_h, seed=self.off))
+
+
+def test_scroll_session_stops_when_page_does_not_scroll(qapp, monkeypatch):
+    notes = []
+    backend = _StuckBackend(_page(2000), 300)
+    result = _run_scroll_session(qapp, backend, monkeypatch, notes=notes)
+    assert result, "must finish on its own instead of capturing forever"
+    assert any("tidak ter-scroll" in n for n in notes)
+
+
+def test_scroll_session_stops_when_frames_never_match(qapp, monkeypatch):
+    notes = []
+    backend = _ChangingBackend(_page(2000), 300)
+    result = _run_scroll_session(qapp, backend, monkeypatch, notes=notes)
+    assert result
+    assert any("tidak bisa disambung" in n for n in notes)
+
+
+def test_scroll_manual_mode_keeps_panel_visible(qapp, monkeypatch):
+    from PySide6.QtCore import QRect
+
+    from raja_capture.config import Config
+    from raja_capture.ui import scroll_capture as sc
+
+    monkeypatch.setattr(sc, "is_wayland", lambda: False)
+
+    class App:
+        pass
+
+    app = App()
+    app.cfg, app.backend, app.notify = Config(), _FakePageBackend(_page(800), 300), lambda *a, **k: None
+    app.cfg.set("scroll_autoscroll", False)
+    first = app.backend.frame()
+
+    class FirstShot:
+        def crop_logical(self, _r):
+            return first
+
+    sess = sc.ScrollCaptureSession(app, QRect(0, 0, 400, 300), None, FirstShot())
+    sess.show()
+    sess.start()
+    assert sess.running and not sess.auto
+    assert not sess.hide_while_running and sess.panel.isVisible()
+    assert sess.panel.btn_done.isEnabled()
+    sess.cancel()

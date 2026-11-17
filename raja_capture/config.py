@@ -61,7 +61,8 @@ DEFAULTS = {
     "tesseract_path": "",
     "ffmpeg_path": "",
     "scroll_interval_ms": 700,
-    "scroll_auto": True,
+    # v0.4.1: new key - older versions saved False here while the checkbox was hidden
+    "scroll_autoscroll": True,
     "first_run_done": False,
     "check_updates": True,
     "last_update_check": 0,

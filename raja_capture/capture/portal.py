@@ -341,7 +341,8 @@ class RemoteDesktopSession:
                        (self.session_handle, "", {"handle_token": ("s", t)}), t)
         devices = res.get("devices", (None, 0))[1]
         if not devices & 2:
-            raise CaptureError("Izin mengontrol pointer tidak diberikan")
+            raise CaptureError("'Izinkan Interaksi Jarak Jauh' (Allow Remote Interaction) belum "
+                               "diaktifkan di dialog GNOME")
         streams = res.get("streams", (None, []))[1]
         if streams:
             node, props = streams[0]

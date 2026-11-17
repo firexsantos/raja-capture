@@ -1,5 +1,5 @@
 """Raja Capture - screen capture, annotation and recording tool."""
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 APP_NAME = "Raja Capture"
 APP_ID = "raja-capture"

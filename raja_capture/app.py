@@ -157,6 +157,9 @@ class RajaApp(QObject):
         self.tray = tray
 
     def _tray_activated(self, reason):
+        if self._scroll is not None and self._scroll.running:
+            self._scroll.finish()  # clicking the tray icon stops scrolling capture
+            return
         if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
             if self.toolbar.isVisible():
                 self.toolbar.hide()
@@ -188,7 +191,10 @@ class RajaApp(QObject):
         if action in CAPTURE_ACTIONS:
             self.start_capture(action)
         elif action == "show":
-            self.show_toolbar()
+            if self._scroll is not None and self._scroll.running:
+                self._scroll.finish()  # opening Raja Capture from the app menu stops it
+            else:
+                self.show_toolbar()
         elif action == "settings":
             self.show_settings()
         elif action == "quit":

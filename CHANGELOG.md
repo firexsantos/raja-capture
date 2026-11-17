@@ -4,6 +4,22 @@ All notable changes to Raja Capture are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.1] - 2026-11-17
+
+### Fixed
+- Scrolling capture kept capturing without scrolling and could not be closed: a setting saved by
+  older versions silently switched it to manual mode with the control panel hidden.
+  Auto-scroll is now the default again and the choice is only remembered when it was visible.
+- Manual scrolling capture keeps its panel (with *Selesai*) visible instead of hiding it.
+- Scrolling capture can no longer run forever: it stops when the page does not move, when
+  frames cannot be stitched, and after at most 4 minutes / 200 frames, with a clear message.
+- Wayland auto-scroll now explains that GNOME's *Allow Remote Interaction* switch must be turned
+  on, and shows a clear message (instead of failing silently) when it was left off.
+
+### Changed
+- Clicking the tray icon or opening Raja Capture from the app menu stops a running
+  scrolling capture.
+
 ## [0.4.0] - 2026-11-17
 
 ### Added
@@ -59,6 +75,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Screen recording to MP4, colour picker, screen ruler and OCR.
 - System tray, floating toolbar, global hotkeys and single-instance command line.
 
+[0.4.1]: https://github.com/firexsantos/raja-capture/releases/tag/v0.4.1
 [0.4.0]: https://github.com/firexsantos/raja-capture/releases/tag/v0.4.0
 [0.3.0]: https://github.com/firexsantos/raja-capture/releases/tag/v0.3.0
 [0.2.0]: https://github.com/firexsantos/raja-capture/releases/tag/v0.2.0

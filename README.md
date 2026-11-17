@@ -223,6 +223,22 @@ Raja Capture checks for new releases and offers a one-click upgrade from inside 
 (tray menu → *Cek pembaruan…*).
 
 <!-- changelog:start -->
+### 0.4.1 — 2026-11-17
+
+#### Fixed
+- Scrolling capture kept capturing without scrolling and could not be closed: a setting saved by
+  older versions silently switched it to manual mode with the control panel hidden.
+  Auto-scroll is now the default again and the choice is only remembered when it was visible.
+- Manual scrolling capture keeps its panel (with *Selesai*) visible instead of hiding it.
+- Scrolling capture can no longer run forever: it stops when the page does not move, when
+  frames cannot be stitched, and after at most 4 minutes / 200 frames, with a clear message.
+- Wayland auto-scroll now explains that GNOME's *Allow Remote Interaction* switch must be turned
+  on, and shows a clear message (instead of failing silently) when it was left off.
+
+#### Changed
+- Clicking the tray icon or opening Raja Capture from the app menu stops a running
+  scrolling capture.
+
 ### 0.4.0 — 2026-11-17
 
 #### Added
@@ -254,20 +270,6 @@ Raja Capture checks for new releases and offers a one-click upgrade from inside 
   was installed from the `.deb`/app menu. GNOME requires a one-time screenshot permission that
   it only asks for while the app has focus; Raja Capture now requests it from a focused dialog
   (with a *reset* option if it was denied before) and retries the capture.
-
-### 0.2.0 — 2026-11-17
-
-#### Added
-- Resize handles for rectangles, ellipses, highlights, pixelate areas, lines and arrows.
-- Audio recording: microphone, system audio, or both.
-- *Send* menu: upload to Imgur or a custom server, upload history, email attachment,
-  open with another program, copy as file, reveal in folder.
-- Installers: AppImage, `.deb`, Windows setup and portable zip, built by GitHub Actions.
-- MIT license, project website and a new README.
-
-#### Fixed
-- Magnifier was dimmed while dragging a selection.
-- Settings tab label "Rekam & OCR" displayed incorrectly.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 <!-- changelog:end -->
